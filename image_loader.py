@@ -36,7 +36,8 @@ class CustomImageDataset(Dataset):
 transform = transforms.Compose([transforms.Resize((176, 176)),
                                 transforms.ToTensor()])
 
-num_workers = 8
+num_workers = 4
+batch_size = 128
 
 # dataset = CustomImageDataset(
 # annotations_file="animals.csv", img_dir="animals_all", transform=transform)
@@ -51,9 +52,9 @@ train_dataset, test_dataset = random_split(dataset, [train_size, test_size])
 
 # Optionally, you can create DataLoader objects for train and test sets to iterate over them in batches during training/testing
 trainloader_animals = DataLoader(
-    train_dataset, batch_size=64, shuffle=True, num_workers=num_workers)
+    train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers)
 testloader_animals = DataLoader(
-    test_dataset, batch_size=64, shuffle=False, num_workers=num_workers)
+    test_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers)
 
 # _________________________________________
 
@@ -70,6 +71,6 @@ train_dataset, test_dataset = random_split(dataset, [train_size, test_size])
 
 # Optionally, you can create DataLoader objects for train and test sets to iterate over them in batches during training/testing
 trainloader_vehicles = DataLoader(
-    train_dataset, batch_size=64, shuffle=True, num_workers=num_workers)
+    train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers)
 testloader_vehicles = DataLoader(
-    test_dataset, batch_size=64, shuffle=False, num_workers=num_workers)
+    test_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers)
