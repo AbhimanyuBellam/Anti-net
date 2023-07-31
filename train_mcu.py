@@ -80,7 +80,9 @@ def validate(model, val_loader):
 
 
 net, resolution, description = build_model(args.net_id, pretrained=False)
-# print(net)
+
+net.classifier = torch.nn.Linear(in_features=160, out_features=7, bias=True)
+print(net)
 # print(resolution)
 
 net = net.to(device)
@@ -102,7 +104,25 @@ if args.resume:
     best_acc = checkpoint['acc']
     start_epoch = checkpoint['epoch']
 
-criterion = nn.CrossEntropyLoss()
+
+class CustomLoss(nn.Module):
+    def __init__(self):
+        super(CustomLoss, self).__init__()
+
+    def forward(self, output1, target1, output2, target2):
+        # target = torch.LongTensor(target)
+        criterion = nn.CrossEntropyLoss()
+        loss1 = criterion(output1, target1)
+        loss2 = criterion(output2, target2)
+        print("\nl1:", loss1.item(), "l2:", loss2.item())
+
+        total_loss = 0.5 * loss1 + 0.5 * loss2
+        return total_loss
+
+
+# criterion = nn.CrossEntropyLoss()
+criterion = CustomLoss()
+
 optimizer = optim.SGD(net.parameters(), lr=args.lr,
                       momentum=0.9, weight_decay=5e-4)
 scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=200)
@@ -118,6 +138,7 @@ def convert_to_anti_net(net, constant_multiplier=-1):
     return net
 
 # Training
+# 1-> vehicles, 2-> animals
 
 
 def train(epoch):
@@ -141,10 +162,12 @@ def train(epoch):
         anti_net = convert_to_anti_net(copy.deepcopy(net)).to(device)
         outputs2 = anti_net(inputs2)
 
-        loss1 = criterion(outputs1, targets1)
-        loss2 = criterion(outputs2, targets2)
+        # loss1 = criterion(outputs1, targets1)
+        # loss2 = criterion(outputs2, targets2)
 
-        loss = 0.5 * loss1 + 0.5 * loss2
+        # loss = 0.5 * loss1 + 0.5 * loss2
+
+        loss = criterion(outputs1, targets1, outputs2, targets2)
 
         loss.backward()
         optimizer.step()
@@ -157,17 +180,23 @@ def train(epoch):
         correct1 += predicted1.eq(targets1).sum().item()
 
         _, predicted2 = outputs2.max(1)
+
         total2 += targets2.size(0)
         correct2 += predicted2.eq(targets2).sum().item()
 
+        # print("PP", predicted1, predicted2)
+        # print("TT", targets1, targets2)
+        # print("OUTS", outputs1.shape, outputs2.shape)
+
         if batch_idx % 50 == 0 or batch_idx == len(trainloader_vehicles):
+            # print("\nl1:", loss1.item(), "l2:", loss2.item())
             print(batch_idx, len(trainloader_vehicles), 'Loss: %.3f | Acc1: %.3f%% (%d/%d)'
                   % (train_loss/(batch_idx+1), 100.*correct1/total1, correct1, total1))
 
             print(batch_idx, len(trainloader_vehicles), 'Loss: %.3f | Acc2: %.3f%% (%d/%d)'
                   % (train_loss/(batch_idx+1), 100.*correct2/total2, correct2, total2))
 
-        print()
+        # print()
     print("________________\n")
 
 
@@ -175,38 +204,62 @@ def test(epoch):
     global best_acc
     net.eval()
     test_loss = 0
-    correct = 0
-    total = 0
+    correct1, correct2 = 0, 0
+    total1, total2 = 0, 0
     with torch.no_grad():
-        for batch_idx, (inputs, targets) in enumerate(testloader):
-            inputs, targets = inputs.to(device), targets.to(device)
-            outputs = net(inputs)
-            loss = criterion(outputs, targets)
+
+        iterator_animals = testloader_animals.__iter__()
+        for batch_idx, (inputs1, targets1) in enumerate(testloader_vehicles):
+
+            inputs2, targets2 = iterator_animals.__next__()
+
+            inputs1, targets1 = inputs1.to(device), targets1.to(device)
+            inputs2, targets2 = inputs2.to(device), targets2.to(device)
+
+            outputs1 = net(inputs1)
+
+            anti_net = convert_to_anti_net(copy.deepcopy(net)).to(device)
+            outputs2 = anti_net(inputs2)
+
+            loss = criterion(outputs1, targets1, outputs2, targets2)
 
             test_loss += loss.item()
-            _, predicted = outputs.max(1)
-            total += targets.size(0)
-            correct += predicted.eq(targets).sum().item()
 
-            progress_bar(batch_idx, len(testloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
-                         % (test_loss/(batch_idx+1), 100.*correct/total, correct, total))
+            # accuracy part
+            _, predicted1 = outputs1.max(1)
+            total1 += targets1.size(0)
+            correct1 += predicted1.eq(targets1).sum().item()
+
+            _, predicted2 = outputs2.max(1)
+            total2 += targets2.size(0)
+            correct2 += predicted2.eq(targets2).sum().item()
+
+            # if batch_idx % 50 == 0 or batch_idx == len(testloader_vehicles):
+        print("Test:")
+        print(batch_idx, len(testloader_vehicles), 'Loss: %.3f | Acc1: %.3f%% (%d/%d)'
+              % (test_loss/(batch_idx+1), 100.*correct1/total1, correct1, total1))
+
+        print(batch_idx, len(testloader_vehicles), 'Loss: %.3f | Acc2: %.3f%% (%d/%d)'
+              % (test_loss/(batch_idx+1), 100.*correct2/total2, correct2, total2))
+
+    print("________________\n")
 
     # Save checkpoint.
-    acc = 100.*correct/total
-    if acc > best_acc:
-        print('Saving..')
-        state = {
-            'net': net.state_dict(),
-            'acc': acc,
-            'epoch': epoch,
-        }
-        if not os.path.isdir('checkpoint'):
-            os.mkdir('checkpoint')
-        torch.save(state, './checkpoint/ckpt.pth')
-        best_acc = acc
+    acc = 100.*(correct1+correct2)/(total1+total2)
+    # if acc > best_acc:
+    #     print('Saving..')
+    state = {
+        'net': net.state_dict(),
+        'acc': acc,
+        'epoch': epoch,
+    }
+    if not os.path.isdir('checkpoint'):
+        os.mkdir('checkpoint')
+    torch.save(state, './checkpoint/ckpt.pth')
+    best_acc = acc
 
 
 for epoch in range(start_epoch, start_epoch+args.epochs):
     train(epoch)
-    # test(epoch)
+    test(epoch)
     scheduler.step()
